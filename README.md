@@ -238,5 +238,5 @@ The tests require the following permissions:
 
 ## TODO
 
-[] Support wildcard query `select * from table_name`
-[] Support integer primary keys. Currently only strings supported.
+- [ ] Support wildcard query `select * from table_name`
+- [ ] Support integer primary keys. Currently only strings supported.
