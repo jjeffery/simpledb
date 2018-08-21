@@ -35,6 +35,7 @@ chosen AWS region, it might be a better alternative.
   - [Consistent Read](#consistent-read)
   - [Create Table / Drop Table](#create-table--drop-table)
 - [Testing](#testing)
+- [TODO](#todo)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -234,3 +235,8 @@ The tests require the following permissions:
   ]
 }
 ```
+
+## TODO
+
+[] Support wildcard query `select * from table_name`
+[] Support integer primary keys. Currently only strings supported.
