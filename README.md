@@ -6,7 +6,7 @@
 [![Coverage Status](https://codecov.io/github/jjeffery/simpledb/badge.svg?branch=master)](https://codecov.io/github/jjeffery/simpledb?branch=master)
 [![GoReportCard](https://goreportcard.com/badge/github.com/jjeffery/simpledb)](https://goreportcard.com/report/github.com/jjeffery/simpledb)
 
-This package provides an SimpleDB driver for Go's `database/sql` package. AWS SimpleDB is a
+This package provides an AWS SimpleDB driver for Go's `database/sql` package. AWS SimpleDB is a
 highly available data store that requires no database administration on the part of the user.
 Although SimpleDB is a [NoSQL](https://en.wikipedia.org/wiki/NoSQL) datastore, it supports an
 SQL-like syntax for querying data.
