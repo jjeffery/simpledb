@@ -409,6 +409,9 @@ func (c *conn) newPutDeleteInputs(ctx context.Context, tableName string, columns
 			case int64:
 				addType(col.ColumnName, "int64")
 				addPut(col.ColumnName, strconv.FormatInt(val, 10))
+			case float64:
+				addType(col.ColumnName, "float64")
+				addPut(col.ColumnName, strconv.FormatFloat(val, 'g', -1, 64))
 			case time.Time:
 				addType(col.ColumnName, "time")
 				addPut(col.ColumnName, val.Format(time.RFC3339))

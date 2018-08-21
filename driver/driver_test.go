@@ -3,16 +3,18 @@ package driver_test
 import (
 	"context"
 	"database/sql"
+	stddriver "database/sql/driver"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
-	_ "github.com/jjeffery/simpledb/driver"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/jjeffery/simpledb/driver"
 )
 
 func TestCreateDropTable(t *testing.T) {
-	// something unlikely to conflict
 	const tableName = "temp_test_table1"
 	createQuery := fmt.Sprintf("create table %s", tableName)
 	dropQuery := fmt.Sprintf("drop table %s", tableName)
@@ -43,14 +45,6 @@ func TestCreateDropTable(t *testing.T) {
 	wantNoError(t, err)
 }
 
-func newDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("simpledb", "")
-	if err != nil {
-		t.Fatalf("cannot open db: %v", err)
-	}
-	return db
-}
-
 func TestCRUD(t *testing.T) {
 	ctx := context.Background()
 	db := newDB(t)
@@ -64,6 +58,8 @@ func TestCRUD(t *testing.T) {
 	)
 	wantNoError(t, err)
 	wantRowsAffected(t, result, 1)
+	_, err = result.LastInsertId()
+	wantNotSupported(t, err)
 	waitForConsistency(t)
 
 	var a, b, id string
@@ -183,6 +179,24 @@ func TestInt64(t *testing.T) {
 	}
 }
 
+func TestFloat64(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	createTestTable(t, db)
+
+	f64 := float64(42)
+	_, err := db.ExecContext(ctx, "insert into temp_test_table1(id, f64) values('ID1', ?)", f64)
+	wantNoError(t, err)
+	waitForConsistency(t)
+
+	var f64a float64
+	err = db.QueryRowContext(ctx, "select f64 from temp_test_table1 where id = 'ID1'").Scan(&f64a)
+	wantNoError(t, err)
+	if f64 != f64a {
+		t.Errorf("got=%v, want=%v", f64a, f64)
+	}
+}
+
 func TestBool(t *testing.T) {
 	ctx := context.Background()
 	db := newDB(t)
@@ -240,17 +254,7 @@ func TestDuplicateInsert(t *testing.T) {
 		"aaa",
 		"bbb",
 	)
-	wantError(t, err)
-	if result != nil {
-		t.Errorf("got=%v, want=nil", result)
-	}
-	if duplicateKeyer, ok := err.(interface{ DuplicateKey() bool }); ok {
-		if got, want := duplicateKeyer.DuplicateKey(), true; got != want {
-			t.Errorf("got=%v, want=%v", got, want)
-		}
-	} else {
-		t.Errorf("got=%v, want=duplicate key error", err)
-	}
+	wantDuplicateKeyError(t, err)
 }
 
 func TestUpdateRowCount(t *testing.T) {
@@ -292,6 +296,74 @@ func TestUpdateRowCount(t *testing.T) {
 	wantRowsAffected(t, result, 0)
 }
 
+func TestNewConnector(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New()
+	connector := driver.NewConnector(sess)
+	if connector == nil {
+		t.Errorf("got=nil, want=non-nil")
+	}
+	conn, err := connector.Connect(ctx)
+	wantNoError(t, err)
+	if conn == nil {
+		t.Errorf("got=nil, want=non-nil")
+	}
+	err = conn.Close()
+	wantNoError(t, err)
+
+	drv := connector.Driver()
+	if drv == nil {
+		t.Errorf("got=nil, want=non-nil")
+	}
+}
+
+// TestNotImplemented is not very useful, but it prevents our
+// code coverage metrics from being artificially lowered.
+func TestNotImplemented(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New()
+	connector := driver.NewConnector(sess)
+	if connector == nil {
+		t.Errorf("got=nil, want=non-nil")
+	}
+	conn, err := connector.Connect(ctx)
+	wantNoError(t, err)
+
+	_, err = conn.Prepare("")
+	wantNotImplemented(t, err)
+
+	_, err = conn.Begin()
+	wantNotImplemented(t, err)
+
+	{
+		queryer := conn.(stddriver.Queryer)
+		_, err = queryer.Query("", nil)
+		wantNotImplemented(t, err)
+	}
+
+	{
+		execer := conn.(stddriver.Execer)
+		_, err = execer.Exec("", nil)
+		wantNotImplemented(t, err)
+	}
+}
+
+// Various error conditinos
+func TestErrors(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+
+	_, err := db.QueryContext(ctx, "insert into table(id,a,b) values('id','a','b')")
+	wantErrorMessageStartingWith(t, err, "expect select query")
+
+	_, err = db.ExecContext(ctx, "select id, a, b from table_name")
+	wantErrorMessageStartingWith(t, err, "unexpected select query")
+
+	_, err = db.ExecContext(ctx, "select id, a from tbl where id = :name", sql.Named("name", "xxx"))
+	wantErrorMessageContaining(t, err, "named args are not implemented")
+
+}
+
 func wantNoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
@@ -303,6 +375,44 @@ func wantError(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("want an error, got nil")
+	}
+}
+
+func wantErrorMessageStartingWith(t *testing.T, err error, prefix string) {
+	t.Helper()
+	wantError(t, err)
+	if msg := err.Error(); !strings.HasPrefix(msg, prefix) {
+		t.Fatalf(`got=%q, want="%s..."`, msg, prefix)
+	}
+}
+
+func wantErrorMessageContaining(t *testing.T, err error, part string) {
+	t.Helper()
+	wantError(t, err)
+	if msg := err.Error(); !strings.Contains(msg, part) {
+		t.Fatalf(`got=%q, want="...%s..."`, msg, part)
+	}
+}
+
+func wantNotImplemented(t *testing.T, err error) {
+	t.Helper()
+	wantErrorMessageStartingWith(t, err, "not implemented")
+}
+
+func wantNotSupported(t *testing.T, err error) {
+	t.Helper()
+	wantErrorMessageStartingWith(t, err, "not supported")
+}
+
+func wantDuplicateKeyError(t *testing.T, err error) {
+	t.Helper()
+	wantErrorMessageStartingWith(t, err, "cannot insert duplicate key")
+	duplicateKeyer, ok := err.(interface{ DuplicateKey() bool })
+	if !ok {
+		t.Fatalf("got=%v, want=duplicate key error", err)
+	}
+	if got, want := duplicateKeyer.DuplicateKey(), true; got != want {
+		t.Fatalf("got=%v, want=%v", got, want)
 	}
 }
 
@@ -318,6 +428,14 @@ func wantRowsAffected(t *testing.T, result sql.Result, want int64) {
 func waitForConsistency(t *testing.T) {
 	// wait for simpledb to become consistent
 	time.Sleep(500 * time.Millisecond)
+}
+
+func newDB(t *testing.T) *sql.DB {
+	db, err := sql.Open("simpledb", "")
+	if err != nil {
+		t.Fatalf("cannot open db: %v", err)
+	}
+	return db
 }
 
 func createTestTable(t *testing.T, db *sql.DB) {
