@@ -6,9 +6,22 @@
 [![Coverage Status](https://codecov.io/github/jjeffery/simpledb/badge.svg?branch=master)](https://codecov.io/github/jjeffery/simpledb?branch=master)
 [![GoReportCard](https://goreportcard.com/badge/github.com/jjeffery/simpledb)](https://goreportcard.com/report/github.com/jjeffery/simpledb)
 
+This package provides an SimpleDB driver for Go's `database/sql` package. AWS SimpleDB is a
+highly available data store that requires no database administration on the part of the user.
+Although SimpleDB is a [NoSQL](https://en.wikipedia.org/wiki/NoSQL) datastore, it supports an
+SQL-like syntax for querying data.
+
+This driver can be useful for applications that are using other AWS services, and have a need
+for a simple database that supports flexible querying. It can be handy when DynamoDB is not
+flexible enough, but an RDS instance seems like overkill.
+
+Using the `database/sql` package to access SimpleDB provides an upgrade path to using a more
+fully-featured SQL database at a future time.
+If [Aurora Serverless](https://aws.amazon.com/rds/aurora/serverless/) is available in your
+chosen AWS region, it might be a better alternative.
+
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-
 
 - [Install](#install)
 - [Example](#example)
