@@ -13,7 +13,7 @@ import (
 
 func TestCreateDropTable(t *testing.T) {
 	// something unlikely to conflict
-	const tableName = "temp_test_table"
+	const tableName = "temp_test_table1"
 	createQuery := fmt.Sprintf("create table %s", tableName)
 	dropQuery := fmt.Sprintf("drop table %s", tableName)
 
@@ -57,7 +57,7 @@ func TestCRUD(t *testing.T) {
 	createTestTable(t, db)
 
 	result, err := db.ExecContext(ctx,
-		"insert into temp_test_table(id, a, b) values(?, ?, ?)",
+		"insert into temp_test_table1(id, a, b) values(?, ?, ?)",
 		"ID1",
 		"aaa",
 		"bbb",
@@ -72,15 +72,15 @@ func TestCRUD(t *testing.T) {
 		arg   string
 	}{
 		{
-			query: "select id, a, b from temp_test_table where id = ?",
+			query: "select id, a, b from temp_test_table1 where id = ?",
 			arg:   "ID1",
 		},
 		{
-			query: "select id, a, b from temp_test_table where a = ?",
+			query: "select id, a, b from temp_test_table1 where a = ?",
 			arg:   "aaa",
 		},
 		{
-			query: "select id, a, b from temp_test_table where b = ?",
+			query: "select id, a, b from temp_test_table1 where b = ?",
 			arg:   "bbb",
 		},
 	}
@@ -99,7 +99,7 @@ func TestCRUD(t *testing.T) {
 	}
 
 	result, err = db.ExecContext(ctx,
-		"update temp_test_table set a = ?, b = ? where id = ?",
+		"update temp_test_table1 set a = ?, b = ? where id = ?",
 		"aaaa",
 		"",
 		"ID1",
@@ -108,7 +108,7 @@ func TestCRUD(t *testing.T) {
 	wantRowsAffected(t, result, 1)
 	waitForConsistency(t)
 
-	err = db.QueryRowContext(ctx, "select id, a, b from temp_test_table where id = 'ID1'").Scan(&id, &a, &b)
+	err = db.QueryRowContext(ctx, "select id, a, b from temp_test_table1 where id = 'ID1'").Scan(&id, &a, &b)
 	wantNoError(t, err)
 	if got, want := a, "aaaa"; got != want {
 		t.Errorf("got=%v, want=%v", got, want)
@@ -121,7 +121,7 @@ func TestCRUD(t *testing.T) {
 	}
 
 	result, err = db.ExecContext(ctx,
-		"update temp_test_table set a = ?, b = ? where id = ?",
+		"update temp_test_table1 set a = ?, b = ? where id = ?",
 		"aaaa5",
 		nil,
 		"ID1",
@@ -131,7 +131,7 @@ func TestCRUD(t *testing.T) {
 	waitForConsistency(t)
 
 	var b2 sql.NullString
-	err = db.QueryRowContext(ctx, "select id, a, b from temp_test_table where id = 'ID1'").Scan(&id, &a, &b2)
+	err = db.QueryRowContext(ctx, "select id, a, b from temp_test_table1 where id = 'ID1'").Scan(&id, &a, &b2)
 	wantNoError(t, err)
 	if got, want := a, "aaaa5"; got != want {
 		t.Errorf("got=%v, want=%v", got, want)
@@ -143,7 +143,7 @@ func TestCRUD(t *testing.T) {
 		t.Errorf("got=%v, want=%v", got, want)
 	}
 
-	//_, err = db.ExecContext(ctx, "delete from temp_test_table where id = ?", "ID1")
+	//_, err = db.ExecContext(ctx, "delete from temp_test_table1 where id = ?", "ID1")
 	wantNoError(t, err)
 }
 
@@ -153,12 +153,12 @@ func TestTime(t *testing.T) {
 	createTestTable(t, db)
 
 	tm := time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
-	_, err := db.ExecContext(ctx, "insert into temp_test_table(id, tm) values('ID1', ?)", tm)
+	_, err := db.ExecContext(ctx, "insert into temp_test_table1(id, tm) values('ID1', ?)", tm)
 	wantNoError(t, err)
 	waitForConsistency(t)
 
 	var tm2 time.Time
-	err = db.QueryRowContext(ctx, "select tm from temp_test_table where id = 'ID1'").Scan(&tm2)
+	err = db.QueryRowContext(ctx, "select tm from temp_test_table1 where id = 'ID1'").Scan(&tm2)
 	wantNoError(t, err)
 	if !tm2.Equal(tm) {
 		t.Errorf("got=%v, want=%v", tm2.Format(time.RFC3339), tm.Format(time.RFC3339))
@@ -171,12 +171,12 @@ func TestInt64(t *testing.T) {
 	createTestTable(t, db)
 
 	i64 := int64(42)
-	_, err := db.ExecContext(ctx, "insert into temp_test_table(id, i64) values('ID1', ?)", i64)
+	_, err := db.ExecContext(ctx, "insert into temp_test_table1(id, i64) values('ID1', ?)", i64)
 	wantNoError(t, err)
 	waitForConsistency(t)
 
 	var i64a int64
-	err = db.QueryRowContext(ctx, "select i64 from temp_test_table where id = 'ID1'").Scan(&i64a)
+	err = db.QueryRowContext(ctx, "select i64 from temp_test_table1 where id = 'ID1'").Scan(&i64a)
 	wantNoError(t, err)
 	if i64 != i64a {
 		t.Errorf("got=%v, want=%v", i64a, i64)
@@ -189,12 +189,12 @@ func TestBool(t *testing.T) {
 	createTestTable(t, db)
 
 	b := true
-	_, err := db.ExecContext(ctx, "insert into temp_test_table(id, b) values('ID1', ?)", b)
+	_, err := db.ExecContext(ctx, "insert into temp_test_table1(id, b) values('ID1', ?)", b)
 	wantNoError(t, err)
 	waitForConsistency(t)
 
 	var b2 bool
-	err = db.QueryRowContext(ctx, "select b from temp_test_table where id = 'ID1'").Scan(&b2)
+	err = db.QueryRowContext(ctx, "select b from temp_test_table1 where id = 'ID1'").Scan(&b2)
 	wantNoError(t, err)
 	if b != b2 {
 		t.Errorf("got=%v, want=%v", b2, b)
@@ -207,12 +207,12 @@ func TestBinary(t *testing.T) {
 	createTestTable(t, db)
 
 	bin := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9}
-	_, err := db.ExecContext(ctx, "insert into temp_test_table(id, b) values('ID1', ?)", bin)
+	_, err := db.ExecContext(ctx, "insert into temp_test_table1(id, b) values('ID1', ?)", bin)
 	wantNoError(t, err)
 	waitForConsistency(t)
 
 	var bin2 []byte
-	err = db.QueryRowContext(ctx, "select b from temp_test_table where id = 'ID1'").Scan(&bin2)
+	err = db.QueryRowContext(ctx, "select b from temp_test_table1 where id = 'ID1'").Scan(&bin2)
 	wantNoError(t, err)
 	if !reflect.DeepEqual(bin, bin2) {
 		t.Errorf("got=%v, want=%v", bin2, bin)
@@ -225,7 +225,7 @@ func TestDuplicateInsert(t *testing.T) {
 	createTestTable(t, db)
 
 	result, err := db.ExecContext(ctx,
-		"insert into temp_test_table(id, a, b) values(?, ?, ?)",
+		"insert into temp_test_table1(id, a, b) values(?, ?, ?)",
 		"ID1",
 		"aaa",
 		"bbb",
@@ -235,7 +235,7 @@ func TestDuplicateInsert(t *testing.T) {
 	waitForConsistency(t)
 
 	result, err = db.ExecContext(ctx,
-		"insert into temp_test_table(id, a, b) values(?, ?, ?)",
+		"insert into temp_test_table1(id, a, b) values(?, ?, ?)",
 		"ID1",
 		"aaa",
 		"bbb",
@@ -259,7 +259,7 @@ func TestUpdateRowCount(t *testing.T) {
 	createTestTable(t, db)
 
 	result, err := db.ExecContext(ctx,
-		"insert into temp_test_table(id, a, b) values(?, ?, ?)",
+		"insert into temp_test_table1(id, a, b) values(?, ?, ?)",
 		"ID1",
 		"aaa",
 		"bbb",
@@ -269,7 +269,7 @@ func TestUpdateRowCount(t *testing.T) {
 	waitForConsistency(t)
 
 	result, err = db.ExecContext(ctx,
-		"update temp_test_table set a = 'xx' where id = ?",
+		"update temp_test_table1 set a = 'xx' where id = ?",
 		"ID1",
 	)
 	wantNoError(t, err)
@@ -277,7 +277,7 @@ func TestUpdateRowCount(t *testing.T) {
 
 	// this will put attributes only
 	result, err = db.ExecContext(ctx,
-		"update temp_test_table set a = 'xx' where id = ?",
+		"update temp_test_table1 set a = 'xx' where id = ?",
 		"ID2",
 	)
 	wantNoError(t, err)
@@ -285,7 +285,7 @@ func TestUpdateRowCount(t *testing.T) {
 
 	// this will put and delete attributes
 	result, err = db.ExecContext(ctx,
-		"update temp_test_table set a = '' where id = ?",
+		"update temp_test_table1 set a = '' where id = ?",
 		"ID2",
 	)
 	wantNoError(t, err)
@@ -322,15 +322,15 @@ func waitForConsistency(t *testing.T) {
 
 func createTestTable(t *testing.T, db *sql.DB) {
 	ctx := context.Background()
-	_, err := db.ExecContext(ctx, "create table temp_test_table")
+	_, err := db.ExecContext(ctx, "create table temp_test_table1")
 	wantNoError(t, err)
-	rows, err := db.QueryContext(ctx, "select id from temp_test_table")
+	rows, err := db.QueryContext(ctx, "select id from temp_test_table1")
 	wantNoError(t, err)
 	for rows.Next() {
 		var id string
 		err = rows.Scan(&id)
 		wantNoError(t, err)
-		_, err = db.ExecContext(ctx, "delete from temp_test_table where id = ?", id)
+		_, err = db.ExecContext(ctx, "delete from temp_test_table1 where id = ?", id)
 		wantNoError(t, err)
 	}
 	waitForConsistency(t)
@@ -338,6 +338,6 @@ func createTestTable(t *testing.T, db *sql.DB) {
 
 func dropTestTable(t *testing.T, db *sql.DB) {
 	ctx := context.Background()
-	_, err := db.ExecContext(ctx, "drop table temp_test_table")
+	_, err := db.ExecContext(ctx, "drop table temp_test_table1")
 	wantNoError(t, err)
 }

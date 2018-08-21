@@ -86,5 +86,5 @@ func exitIfError(err error) {
 // waitForConsistency waits a short time for the SimpleDB domain
 // to be consistent across all copies.
 func waitForConsistency() {
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 }
