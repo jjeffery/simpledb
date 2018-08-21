@@ -11,6 +11,8 @@
 go get github.com/jjeffery/simpledb/...
 ```
 
+Requires go 1.10 or later.
+
 ## Example
 
 See the [GoDoc](https://godoc.org/github.com/jjeffery/simpledb)

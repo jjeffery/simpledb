@@ -1,16 +1,15 @@
 language: go
 go:
   - "1.10"
-  - "1.9"
 
 install:
   - go get github.com/jjeffery/errors
   - go get github.com/jjeffery/sqlr
   - go get github.com/aws/aws-sdk-go/...
+  - go get golang.org/x/sync/errgroup
 
 script:
-  - go build ./...
-  - go test ./internal/parser
-  # can only test the parser, because the other package tests
-  # require an AWS connection
+  - go test -coverprofile=coverage.txt ./...
 
+after_success:
+  - bash <(curl -s https://codecov.io/bash)

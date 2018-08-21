@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	_ "github.com/jjeffery/simpledb/driver"
 )
@@ -17,6 +18,7 @@ func Example() {
 	// create a table
 	_, err = db.ExecContext(ctx, "create table temp_test_table")
 	exitIfError(err)
+	waitForConsistency()
 
 	// insert some rows
 	for i := 0; i < 10; i++ {
@@ -29,6 +31,7 @@ func Example() {
 		)
 		exitIfError(err)
 	}
+	waitForConsistency()
 
 	// update a row
 	_, err = db.ExecContext(ctx,
@@ -78,4 +81,10 @@ func exitIfError(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// waitForConsistency waits a short time for the SimpleDB domain
+// to be consistent across all copies.
+func waitForConsistency() {
+	time.Sleep(500 * time.Millisecond)
 }
