@@ -239,8 +239,8 @@ The tests require the following permissions:
 ## TODO
 
 - [ ] Detect queries with a where clause matching `where id = ?`. Implement
-      and implement using the much faster SimpleDB `GetItem` method instead
-      of the `Select` method.
+      using the much faster SimpleDB `GetItem` method instead of the `Select`
+      method.
 - [ ] Support wildcard query `select * from table_name`
 - [ ] Support integer primary keys. Currently only strings supported.
 - [ ] Provide options in the connection string, region, consistent read, etc
