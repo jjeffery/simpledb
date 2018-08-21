@@ -3,6 +3,7 @@
 [![GoDoc](https://godoc.org/github.com/jjeffery/simpledb?status.svg)](https://godoc.org/github.com/jjeffery/simpledb)
 [![License](http://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://raw.githubusercontent.com/jjeffery/simpledb/master/LICENSE.md)
 [![Build Status (Linux)](https://travis-ci.org/jjeffery/simpledb.svg?branch=master)](https://travis-ci.org/jjeffery/simpledb)
+[![Coverage Status](https://codecov.io/github/jjeffery/simpledb/badge.svg?branch=master)](https://codecov.io/github/jjeffery/simpledb?branch=master)
 [![GoReportCard](https://goreportcard.com/badge/github.com/jjeffery/simpledb)](https://goreportcard.com/report/github.com/jjeffery/simpledb)
 
 ## Install
@@ -15,12 +16,11 @@ Requires go 1.10 or later.
 
 ## Example
 
-See the [GoDoc](https://godoc.org/github.com/jjeffery/simpledb)
-documentation for example usage.
+See the [GoDoc package example](https://godoc.org/github.com/jjeffery/simpledb#example-package).
 
 ## SQL
 
-### SELECT
+### Select
 
 All the restrictions of the SimpleDB `select` statement apply.
 
@@ -35,9 +35,7 @@ from domain_name
 See the [SimpleDB documentation](https://docs.aws.amazon.com/AmazonSimpleDB/latest/DeveloperGuide/UsingSelect.html)
 for more details.
 
-The driver adds the following enhancements to the SimpleDB select statement:
-
-### Placeholders
+## Placeholders
 
 Placeholders can be used to substitute arguments.
 
@@ -45,11 +43,11 @@ Placeholders can be used to substitute arguments.
 select id, a, b, c from my_table where a = ?
 ```
 
-### id column
+## id column
 
 The column `id` is special, and refers to the item name.
 
-### Insert
+## Insert
 
 Insert statements can insert one row at a time. The `id` column is mandatory.
 
@@ -58,7 +56,7 @@ insert into my_table(id, a, b, c)
 values (?, ?, ?, ?)
 ```
 
-### Update
+## Update
 
 Update statements can update one row at a time. The `id` column is the only column
 allowed in the `where` clause.
@@ -69,7 +67,7 @@ set a = ?, b = ?, c = ?
 where id = ?
 ```
 
-### Delete
+## Delete
 
 Delete statements can delete one row at a time. The `id` column is the only column
 allowed in the `where` clause.
@@ -79,7 +77,7 @@ delete from my_table
 where id = ?
 ```
 
-### Consistent read
+## Consistent read
 
 If the select statement starts with the word "consistent", then a consistent read will be performed.
 

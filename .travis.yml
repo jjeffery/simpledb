@@ -9,7 +9,7 @@ install:
   - go get golang.org/x/sync/errgroup
 
 script:
-  - go test -coverprofile=coverage.txt ./...
+  - go test -coverprofile=coverage.txt ./driver ./internal/...
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)
