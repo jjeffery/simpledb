@@ -49,7 +49,7 @@ Requires go 1.10 or later.
 
 ## Example
 
-See the [GoDoc package example](https://godoc.org/github.com/jjeffery/simpledb#example-package).
+See also the [GoDoc package example](https://godoc.org/github.com/jjeffery/simpledb#example-package).
 
 ```go
 package main
@@ -240,3 +240,4 @@ The tests require the following permissions:
 
 - [ ] Support wildcard query `select * from table_name`
 - [ ] Support integer primary keys. Currently only strings supported.
+- [ ] Provide options in the connection string, region, consistent read, etc
