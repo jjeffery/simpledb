@@ -295,6 +295,13 @@ func TestUpdateRowCount(t *testing.T) {
 	)
 	wantNoError(t, err)
 	wantRowsAffected(t, result, 0)
+
+	result, err = db.ExecContext(ctx,
+		"upsert temp_test_table1 set a = '' where id = ?",
+		"ID2",
+	)
+	wantNoError(t, err)
+	wantRowsAffected(t, result, 1)
 }
 
 func TestConnector(t *testing.T) {

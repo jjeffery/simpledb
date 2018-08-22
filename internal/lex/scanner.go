@@ -59,6 +59,7 @@ var (
 
 		// not simpledb keywords, but SQL keywords
 		"update": true,
+		"upsert": true,
 		"insert": true,
 		"delete": true,
 		"create": true,

@@ -40,6 +40,7 @@ type InsertQuery struct {
 // UpdateQuery is the representation of an update query.
 type UpdateQuery struct {
 	TableName string
+	Upsert    bool
 	Columns   []Column
 	Key       Key
 }
@@ -208,7 +209,7 @@ func (p *parser) parse(query string) (q *Query, err error) {
 	switch strings.ToLower(text) {
 	case "select", "consistent":
 		p.parseSelect()
-	case "update":
+	case "update", "upsert":
 		p.parseUpdate()
 	case "insert":
 		p.parseInsert()
@@ -327,6 +328,9 @@ func (p *parser) copyRemaining() {
 
 func (p *parser) parseUpdate() {
 	p.query.Update = &UpdateQuery{}
+	if p.text() == "upsert" {
+		p.query.Update.Upsert = true
+	}
 	p.next()
 	p.expect(lex.TokenIdent)
 	p.query.Update.TableName = lex.Unquote(p.text())

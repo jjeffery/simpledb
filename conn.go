@@ -331,15 +331,17 @@ func (c *conn) updateRow(ctx context.Context, q *parse.UpdateQuery, args []drive
 	if err != nil {
 		return nil, err
 	}
-	// Add a condition that the item must already exist.
-	// The `sql:id` attribute is added to every item.
-	putInput.Expected = &simpledb.UpdateCondition{
-		Exists: aws.Bool(true),
-		Name:   aws.String("sql:id"),
-		// TODO(jpj): if/when we allow int64 keys, we need to get the key type from the query
-		Value: aws.String("string"),
+	if !q.Upsert {
+		// Add a condition that the item must already exist.
+		// The `sql:id` attribute is added to every item.
+		putInput.Expected = &simpledb.UpdateCondition{
+			Exists: aws.Bool(true),
+			Name:   aws.String("sql:id"),
+			// TODO(jpj): if/when we allow int64 keys, we need to get the key type from the query
+			Value: aws.String("string"),
+		}
+		deleteInput.Expected = putInput.Expected
 	}
-	deleteInput.Expected = putInput.Expected
 
 	// An update may consist of either a put or a delete, or maybe both.
 	// the goroutine for put updates putItemExists, and the goroutine for
