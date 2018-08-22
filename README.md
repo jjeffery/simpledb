@@ -243,6 +243,9 @@ The tests require the following permissions:
       method.
 - [x] Support mapping table names to domain names. Prefix all table names with a
       schema name, and map individual table names to a different domain name.
+- [ ] Support PostgreSQL-style placeholders (`$1`, `$2`, ...). This will help with
+      migrating from SimpleDB to PostgreSQL should the queries get to a point where
+      a real DB is requried.
 - [ ] Support update statements with an extra column equality test using a SimpleDB
       UpdateCondition in the PutAttributes request.
 
