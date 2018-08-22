@@ -243,6 +243,13 @@ The tests require the following permissions:
       method.
 - [x] Support mapping table names to domain names. Prefix all table names with a
       schema name, and map individual table names to a different domain name.
+- [ ] Support update statements with an extra column equality test using a SimpleDB
+      UpdateCondition in the PutAttributes request.
+
+```sql
+      update tbl set a = ? where id = ? and b = ?
+```
+
 - [ ] Support wildcard query `select * from table_name`
 - [ ] Support integer primary keys. Currently only strings supported.
 - [ ] Provide options in the connection string, region, consistent read, etc
