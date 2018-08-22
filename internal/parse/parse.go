@@ -8,44 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	// TODO(jpj): copy this package and simplify
-	"github.com/jjeffery/sqlr/private/scanner"
-)
-
-var (
-	// TODO(jpj): these keywords are not particularly useful.
-	// Better to keep the number small and adjust as the parsing
-	// progresses. Still, the code works so leave it for now.
-	keywords = []string{
-		// list obtained from
-		// https://docs.aws.amazon.com/AmazonSimpleDB/latest/DeveloperGuide/QuotingRulesSelect.html
-		"or",
-		"and",
-		"not",
-		"from",
-		"where",
-		"select",
-		"like",
-		"null",
-		"is",
-		"order",
-		"by",
-		"asc",
-		"desc",
-		"in",
-		"between",
-		"intersection",
-		"limit",
-		"every",
-
-		// not recognized by simpledb
-		"update",
-		"insert",
-		"delete",
-		"create",
-		"drop",
-		"consistent",
-	}
+	"github.com/jjeffery/simpledbsql/internal/lex"
 )
 
 // Query is the representation of a single parsed query.
@@ -152,14 +115,14 @@ func Parse(query string) (*Query, error) {
 }
 
 type parser struct {
-	lexer            *scanner.Scanner
+	lexer            *lex.Scanner
 	query            Query
 	placeholderIndex int
 	lexemes          []string
 }
 
 func (p *parser) next() bool {
-	if p.token() == scanner.PLACEHOLDER {
+	if p.token() == lex.TokenPlaceholder {
 		// keep a track of how many placeholders
 		// are behind us, so when the curent token
 		// is a placeholder, then placeholderIndex
@@ -168,12 +131,12 @@ func (p *parser) next() bool {
 	}
 	p.lexer.Scan()
 	for {
-		if p.token() == scanner.COMMENT {
+		if p.token() == lex.TokenComment {
 			// ignore all comments
 			p.lexer.Scan()
 			continue
 		}
-		if p.token() == scanner.WS {
+		if p.token() == lex.TokenWhiteSpace {
 			// when white space is not being ignored, copy
 			if len(p.lexemes) > 0 && p.lexemes[len(p.lexemes)-1] != " " {
 				p.lexemes = append(p.lexemes, " ")
@@ -183,10 +146,10 @@ func (p *parser) next() bool {
 		}
 		break
 	}
-	return p.token() != scanner.EOF
+	return p.token() != lex.TokenEOF
 }
 
-func (p *parser) token() scanner.Token {
+func (p *parser) token() lex.Token {
 	return p.lexer.Token()
 }
 
@@ -198,7 +161,7 @@ func (p *parser) copyText() {
 	p.lexemes = append(p.lexemes, p.text())
 }
 
-func (p *parser) expect(toks ...scanner.Token) {
+func (p *parser) expect(toks ...lex.Token) {
 	current := p.token()
 	for _, tok := range toks {
 		if current == tok {
@@ -215,7 +178,7 @@ func (p *parser) expectText(text string) {
 }
 
 func (p *parser) expectEOF() {
-	if p.token() != scanner.EOF {
+	if p.token() != lex.TokenEOF {
 		p.errorf("expected end of query, found %q", p.text())
 	}
 }
@@ -227,8 +190,7 @@ func (p *parser) errorf(format string, args ...interface{}) {
 
 func (p *parser) parse(query string) (q *Query, err error) {
 	reader := strings.NewReader(query)
-	p.lexer = scanner.New(reader)
-	p.lexer.AddKeywords(keywords...)
+	p.lexer = lex.New(reader)
 	p.lexer.IgnoreWhiteSpace = true
 
 	defer func() {
@@ -242,10 +204,7 @@ func (p *parser) parse(query string) (q *Query, err error) {
 	}()
 
 	p.next()
-	tok, text := p.token(), p.text()
-	if tok != scanner.KEYWORD {
-		p.errorf("unrecognized query %q", text)
-	}
+	text := p.text()
 	switch strings.ToLower(text) {
 	case "select", "consistent":
 		p.parseSelect()
@@ -260,7 +219,10 @@ func (p *parser) parse(query string) (q *Query, err error) {
 	case "drop":
 		p.parseDropTable()
 	default:
-		p.errorf("unexpected keyword %q", text)
+		if p.token() == lex.TokenKeyword {
+			p.errorf("unexpected keyword %q", text)
+		}
+		p.errorf("unrecognized query %q", text)
 	}
 
 	return &p.query, nil
@@ -282,14 +244,14 @@ func (p *parser) parseSelect() {
 // IsID returns true if name corresponds to the special
 // name of the item name column ("id").
 func IsID(name string) bool {
-	name = scanner.Unquote(name)
+	name = lex.Unquote(name)
 	return strings.EqualFold(name, "id")
 }
 
 func (p *parser) parseSelectColumnList() {
 	expectIdent := func() {
-		p.expect(scanner.IDENT)
-		name := scanner.Unquote(p.text())
+		p.expect(lex.TokenIdent)
+		name := lex.Unquote(p.text())
 		p.query.Select.ColumnNames = append(p.query.Select.ColumnNames, name)
 		p.next()
 	}
@@ -303,8 +265,8 @@ func (p *parser) parseSelectColumnList() {
 func (p *parser) parseSelectFromClause() {
 	p.expectText("from")
 	p.next()
-	p.expect(scanner.IDENT)
-	p.query.Select.TableName = scanner.Unquote(p.text())
+	p.expect(lex.TokenIdent)
+	p.query.Select.TableName = lex.Unquote(p.text())
 	p.next()
 }
 
@@ -319,7 +281,7 @@ func (p *parser) parseSelectWhereClause() {
 	p.copyText()
 	p.next()
 
-	if p.token() != scanner.IDENT || scanner.Unquote(p.text()) != "id" {
+	if p.token() != lex.TokenIdent || lex.Unquote(p.text()) != "id" {
 		p.copyRemaining()
 		return
 	}
@@ -334,10 +296,10 @@ func (p *parser) parseSelectWhereClause() {
 	p.next()
 
 	key := Key{}
-	if p.token() == scanner.LITERAL {
-		value := scanner.Unquote(p.text())
+	if p.token() == lex.TokenLiteral {
+		value := lex.Unquote(p.text())
 		key.Value = &value
-	} else if p.token() == scanner.PLACEHOLDER {
+	} else if p.token() == lex.TokenPlaceholder {
 		key.Ordinal = p.placeholderIndex
 	} else {
 		p.copyRemaining()
@@ -346,7 +308,7 @@ func (p *parser) parseSelectWhereClause() {
 	p.copyText()
 	p.next()
 
-	if p.token() != scanner.EOF {
+	if p.token() != lex.TokenEOF {
 		p.copyRemaining()
 		return
 	}
@@ -355,7 +317,7 @@ func (p *parser) parseSelectWhereClause() {
 }
 
 func (p *parser) copyRemaining() {
-	for p.token() != scanner.EOF {
+	for p.token() != lex.TokenEOF {
 		p.copyText()
 		p.next()
 	}
@@ -366,8 +328,8 @@ func (p *parser) copyRemaining() {
 func (p *parser) parseUpdate() {
 	p.query.Update = &UpdateQuery{}
 	p.next()
-	p.expect(scanner.IDENT)
-	p.query.Update.TableName = scanner.Unquote(p.text())
+	p.expect(lex.TokenIdent)
+	p.query.Update.TableName = lex.Unquote(p.text())
 	p.next()
 	p.expectText("set")
 	p.next()
@@ -385,18 +347,18 @@ func (p *parser) parseUpdateColumns() {
 }
 
 func (p *parser) parseUpdateColumn() {
-	p.expect(scanner.IDENT)
+	p.expect(lex.TokenIdent)
 	col := Column{
-		ColumnName: scanner.Unquote(p.text()),
+		ColumnName: lex.Unquote(p.text()),
 	}
 	p.next()
 	p.expectText("=")
 	p.next()
-	p.expect(scanner.PLACEHOLDER, scanner.LITERAL)
-	if p.token() == scanner.PLACEHOLDER {
+	p.expect(lex.TokenPlaceholder, lex.TokenLiteral)
+	if p.token() == lex.TokenPlaceholder {
 		col.Ordinal = p.placeholderIndex
 	} else {
-		value := scanner.Unquote(p.text())
+		value := lex.Unquote(p.text())
 		col.Value = &value
 	}
 	p.query.Update.Columns = append(p.query.Update.Columns, col)
@@ -410,13 +372,13 @@ func (p *parser) parseUpdateWhere() {
 	p.next()
 	p.expectText("=")
 	p.next()
-	p.expect(scanner.PLACEHOLDER, scanner.LITERAL)
-	if p.token() == scanner.PLACEHOLDER {
+	p.expect(lex.TokenPlaceholder, lex.TokenLiteral)
+	if p.token() == lex.TokenPlaceholder {
 		p.query.Update.Key = Key{
 			Ordinal: p.placeholderIndex,
 		}
 	} else {
-		value := scanner.Unquote(p.text())
+		value := lex.Unquote(p.text())
 		p.query.Update.Key = Key{
 			Value: &value,
 		}
@@ -430,8 +392,8 @@ func (p *parser) parseInsert() {
 	if strings.EqualFold(p.text(), "into") {
 		p.next()
 	}
-	p.expect(scanner.IDENT)
-	p.query.Insert.TableName = scanner.Unquote(p.text())
+	p.expect(lex.TokenIdent)
+	p.query.Insert.TableName = lex.Unquote(p.text())
 	p.next()
 	p.expectText("(")
 	p.next()
@@ -451,9 +413,9 @@ func (p *parser) parseInsert() {
 func (p *parser) parseInsertColumnList() {
 	var columns []Column
 	expectIdent := func() {
-		p.expect(scanner.IDENT)
+		p.expect(lex.TokenIdent)
 		col := Column{
-			ColumnName: scanner.Unquote(p.text()),
+			ColumnName: lex.Unquote(p.text()),
 		}
 		columns = append(columns, col)
 		p.next()
@@ -479,11 +441,11 @@ func (p *parser) parseInsertValueList() {
 			p.next()
 		}
 		col := &p.query.Insert.Columns[i]
-		p.expect(scanner.PLACEHOLDER, scanner.LITERAL)
-		if p.token() == scanner.PLACEHOLDER {
+		p.expect(lex.TokenPlaceholder, lex.TokenLiteral)
+		if p.token() == lex.TokenPlaceholder {
 			col.Ordinal = p.placeholderIndex
 		} else {
-			value := scanner.Unquote(p.text())
+			value := lex.Unquote(p.text())
 			col.Value = &value
 		}
 		p.next()
@@ -519,8 +481,8 @@ func (p *parser) parseDelete() {
 	if strings.ToLower(p.text()) == "from" {
 		p.next()
 	}
-	p.expect(scanner.IDENT)
-	p.query.Delete.TableName = scanner.Unquote(p.text())
+	p.expect(lex.TokenIdent)
+	p.query.Delete.TableName = lex.Unquote(p.text())
 	p.next()
 	p.parseDeleteWhere()
 	p.expectEOF()
@@ -533,13 +495,13 @@ func (p *parser) parseDeleteWhere() {
 	p.next()
 	p.expectText("=")
 	p.next()
-	p.expect(scanner.PLACEHOLDER, scanner.LITERAL)
-	if p.token() == scanner.PLACEHOLDER {
+	p.expect(lex.TokenPlaceholder, lex.TokenLiteral)
+	if p.token() == lex.TokenPlaceholder {
 		p.query.Delete.Key = Key{
 			Ordinal: p.placeholderIndex,
 		}
 	} else {
-		value := scanner.Unquote(p.text())
+		value := lex.Unquote(p.text())
 		p.query.Delete.Key = Key{
 			Value: &value,
 		}
@@ -552,8 +514,8 @@ func (p *parser) parseCreateTable() {
 	p.next()
 	p.expectText("table")
 	p.next()
-	p.expect(scanner.IDENT)
-	p.query.CreateTable.TableName = scanner.Unquote(p.text())
+	p.expect(lex.TokenIdent)
+	p.query.CreateTable.TableName = lex.Unquote(p.text())
 	p.next()
 	p.expectEOF()
 }
@@ -563,8 +525,8 @@ func (p *parser) parseDropTable() {
 	p.next()
 	p.expectText("table")
 	p.next()
-	p.expect(scanner.IDENT)
-	p.query.DropTable.TableName = scanner.Unquote(p.text())
+	p.expect(lex.TokenIdent)
+	p.query.DropTable.TableName = lex.Unquote(p.text())
 	p.next()
 	p.expectEOF()
 }

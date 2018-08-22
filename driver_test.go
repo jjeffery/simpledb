@@ -351,7 +351,7 @@ func TestErrors(t *testing.T) {
 	ctx := context.Background()
 	db := newDB(t)
 
-	_, err := db.QueryContext(ctx, "insert into table(id,a,b) values('id','a','b')")
+	_, err := db.QueryContext(ctx, "insert into tbl(id,a,b) values('id','a','b')")
 	wantErrorMessageStartingWith(t, err, "expect select query")
 
 	_, err = db.ExecContext(ctx, "select id, a, b from table_name")
