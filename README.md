@@ -199,9 +199,9 @@ consistent select id, a, b, c from my_table where a = ?
 Create and delete SimpleDB domains using the `create table` and `drop table` commands.
 
 ```sql
-create table my_domain
+create table my_table
 
-drop table my_domain
+drop table my_table
 ```
 
 ## Testing
@@ -210,7 +210,7 @@ There is no option for running SimpleDB locally, so all tests require a valid AW
 credentials are detected using the default mechanism, using:
 
 - Environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-- Environment variable AWS_PROFILE and file ~/.aws/credentisls
+- Environment variable AWS_PROFILE and file ~/.aws/credentials
 - Environment variable AWS_REGION, or if not set file ~/.aws/config
 
 The tests require the following permissions:
