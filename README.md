@@ -1,10 +1,10 @@
 # AWS SimpleDB driver for Go's database/sql package
 
-[![GoDoc](https://godoc.org/github.com/jjeffery/simpledb?status.svg)](https://godoc.org/github.com/jjeffery/simpledb)
-[![License](http://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://raw.githubusercontent.com/jjeffery/simpledb/master/LICENSE.md)
-[![Build Status (Linux)](https://travis-ci.org/jjeffery/simpledb.svg?branch=master)](https://travis-ci.org/jjeffery/simpledb)
-[![Coverage Status](https://codecov.io/github/jjeffery/simpledb/badge.svg?branch=master)](https://codecov.io/github/jjeffery/simpledb?branch=master)
-[![GoReportCard](https://goreportcard.com/badge/github.com/jjeffery/simpledb)](https://goreportcard.com/report/github.com/jjeffery/simpledb)
+[![GoDoc](https://godoc.org/github.com/jjeffery/simpledbsql?status.svg)](https://godoc.org/github.com/jjeffery/simpledbsql)
+[![License](http://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://raw.githubusercontent.com/jjeffery/simpledbsql/master/LICENSE.md)
+[![Build Status (Linux)](https://travis-ci.org/jjeffery/simpledbsql.svg?branch=master)](https://travis-ci.org/jjeffery/simpledbsql)
+[![Coverage Status](https://codecov.io/github/jjeffery/simpledbsql/badge.svg?branch=master)](https://codecov.io/github/jjeffery/simpledbsql?branch=master)
+[![GoReportCard](https://goreportcard.com/badge/github.com/jjeffery/simpledbsql)](https://goreportcard.com/report/github.com/jjeffery/simpledbsql)
 
 This package provides an AWS SimpleDB driver for Go's `database/sql` package. AWS SimpleDB is a
 highly available data store that requires no database administration on the part of the user.
@@ -42,14 +42,14 @@ chosen AWS region, it might be a better alternative.
 ## Install
 
 ```bash
-go get github.com/jjeffery/simpledb/...
+go get github.com/jjeffery/simpledbsql
 ```
 
 Requires go 1.10 or later.
 
 ## Example
 
-See also the [GoDoc package example](https://godoc.org/github.com/jjeffery/simpledb#example-package).
+See also the [GoDoc package example](https://godoc.org/github.com/jjeffery/simpledbsql#example-package).
 
 ```go
 package main
@@ -61,7 +61,7 @@ import (
     "log"
     "time"
 
-    _ "github.com/jjeffery/simpledb/driver"
+    _ "github.com/jjeffery/simpledbsql"
 )
 
 func main() {
@@ -238,9 +238,11 @@ The tests require the following permissions:
 
 ## TODO
 
-- [ ] Detect queries with a where clause matching `where id = ?`. Implement
-      using the much faster SimpleDB `GetItem` method instead of the `Select`
+- [x] Detect queries with a where clause matching `where id = ?`. Implement
+      using the much faster SimpleDB `GetAttributes` method instead of the `Select`
       method.
+- [x] Support mapping table names to domain names. Prefix all table names with a
+      schema name, and map individual table names to a different domain name.
 - [ ] Support wildcard query `select * from table_name`
 - [ ] Support integer primary keys. Currently only strings supported.
 - [ ] Provide options in the connection string, region, consistent read, etc

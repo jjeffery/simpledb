@@ -1,4 +1,4 @@
-package simpledb_test
+package simpledbsql_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	_ "github.com/jjeffery/simpledb/driver"
+	_ "github.com/jjeffery/simpledbsql"
 )
 
 func Example() {

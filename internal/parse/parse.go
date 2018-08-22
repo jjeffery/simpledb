@@ -62,11 +62,9 @@ type Query struct {
 type SelectQuery struct {
 	ConsistentRead bool
 	ColumnNames    []string
-
-	// Segments consists of text that surrounds
-	// the placeholders. There is always one more
-	// segment than there are placeholders.
-	Segments []string
+	TableName      string
+	WhereClause    []string // lexemes starting with "WHERE"
+	Key            *Key     // if non-nil, indicates a "where id = ?" query
 }
 
 // InsertQuery is the representation of an insert query.
@@ -133,10 +131,8 @@ func (key *Key) String(values []driver.Value) (string, error) {
 		return *key.Value, nil
 	}
 	if key.Ordinal < 0 || key.Ordinal >= len(values) {
-		return "", fmt.Errorf("internal error: key ordinal=%d, value len=%d", key.Ordinal, len(values))
+		return "", errors.New("not enough args supplied")
 	}
-	// TODO(jpj): verify that key.Ordinal can never be out of range
-	// for the values slice
 	v := values[key.Ordinal]
 	if s, ok := v.(string); ok {
 		return s, nil
@@ -158,8 +154,8 @@ func Parse(query string) (*Query, error) {
 type parser struct {
 	lexer            *scanner.Scanner
 	query            Query
-	sb               strings.Builder
 	placeholderIndex int
+	lexemes          []string
 }
 
 func (p *parser) next() bool {
@@ -178,10 +174,10 @@ func (p *parser) next() bool {
 			continue
 		}
 		if p.token() == scanner.WS {
-			// if not ignoring white space then we are copying
-			// the query, which happens for select queries --
-			// copy a single ws to the string builder
-			p.sb.WriteRune(' ')
+			// when white space is not being ignored, copy
+			if len(p.lexemes) > 0 && p.lexemes[len(p.lexemes)-1] != " " {
+				p.lexemes = append(p.lexemes, " ")
+			}
 			p.lexer.Scan()
 			continue
 		}
@@ -199,7 +195,7 @@ func (p *parser) text() string {
 }
 
 func (p *parser) copyText() {
-	p.sb.WriteString(p.text())
+	p.lexemes = append(p.lexemes, p.text())
 }
 
 func (p *parser) expect(toks ...scanner.Token) {
@@ -277,10 +273,10 @@ func (p *parser) parseSelect() {
 		p.next()
 		p.expectText("select")
 	}
-	p.copyText()
 	p.next()
 	p.parseSelectColumnList()
-	p.parseSegments()
+	p.parseSelectFromClause()
+	p.parseSelectWhereClause()
 }
 
 // IsID returns true if name corresponds to the special
@@ -291,19 +287,10 @@ func IsID(name string) bool {
 }
 
 func (p *parser) parseSelectColumnList() {
-	var columnNames []string
-
 	expectIdent := func() {
 		p.expect(scanner.IDENT)
 		name := scanner.Unquote(p.text())
 		p.query.Select.ColumnNames = append(p.query.Select.ColumnNames, name)
-		if !IsID(name) {
-			// don't copy the special id column to the sql output,
-			// simpledb always incluldes the item name
-			columnNames = append(columnNames, p.text())
-			typeName := "sql:" + scanner.Unquote(p.text()) // TODO(jpj): need to have common fn for this
-			columnNames = append(columnNames, scanner.Quote(typeName, "`", "`"))
-		}
 		p.next()
 	}
 	expectIdent()
@@ -311,35 +298,69 @@ func (p *parser) parseSelectColumnList() {
 		p.next()
 		expectIdent()
 	}
-	p.sb.WriteRune(' ')
-	if len(columnNames) > 0 {
-		p.sb.WriteString(strings.Join(columnNames, ", "))
-	} else {
-		// this happens for 'select id from ...', so there are no columns
-		p.sb.WriteString("itemName()")
-	}
-	p.sb.WriteRune(' ')
 }
 
-func (p *parser) parseSegments() {
-	// need white space when copying segments
+func (p *parser) parseSelectFromClause() {
+	p.expectText("from")
+	p.next()
+	p.expect(scanner.IDENT)
+	p.query.Select.TableName = scanner.Unquote(p.text())
+	p.next()
+}
+
+func (p *parser) parseSelectWhereClause() {
+	// need white space when copying lexemes
 	p.lexer.IgnoreWhiteSpace = false
+
+	if strings.ToLower(p.text()) != "where" {
+		p.copyRemaining()
+		return
+	}
+	p.copyText()
+	p.next()
+
+	if p.token() != scanner.IDENT || scanner.Unquote(p.text()) != "id" {
+		p.copyRemaining()
+		return
+	}
+	p.copyText()
+	p.next()
+
+	if p.text() != "=" {
+		p.copyRemaining()
+		return
+	}
+	p.copyText()
+	p.next()
+
+	key := Key{}
+	if p.token() == scanner.LITERAL {
+		value := scanner.Unquote(p.text())
+		key.Value = &value
+	} else if p.token() == scanner.PLACEHOLDER {
+		key.Ordinal = p.placeholderIndex
+	} else {
+		p.copyRemaining()
+		return
+	}
+	p.copyText()
+	p.next()
+
+	if p.token() != scanner.EOF {
+		p.copyRemaining()
+		return
+	}
+
+	p.query.Select.Key = &key
+}
+
+func (p *parser) copyRemaining() {
 	for p.token() != scanner.EOF {
-		if p.token() == scanner.PLACEHOLDER {
-			segment := p.sb.String()
-			p.sb = strings.Builder{}
-			p.query.Select.Segments = append(p.query.Select.Segments, segment)
-		} else {
-			if p.token() == scanner.IDENT && IsID(p.text()) {
-				p.sb.WriteString("itemName()")
-			} else {
-				p.copyText()
-			}
-		}
+		p.copyText()
 		p.next()
 	}
-	p.query.Select.Segments = append(p.query.Select.Segments, p.sb.String())
-	p.sb = strings.Builder{}
+	p.query.Select.WhereClause = p.lexemes
+	p.lexemes = nil
 }
 
 func (p *parser) parseUpdate() {

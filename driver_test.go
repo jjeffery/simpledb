@@ -1,9 +1,9 @@
-package driver_test
+package simpledbsql
 
 import (
 	"context"
 	"database/sql"
-	stddriver "database/sql/driver"
+	"database/sql/driver"
 	"fmt"
 	"reflect"
 	"strings"
@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/jjeffery/simpledb/driver"
+	"github.com/aws/aws-sdk-go/service/simpledb"
+	"github.com/jjeffery/simpledbsql/internal/parse"
 )
 
 func TestCreateDropTable(t *testing.T) {
@@ -296,14 +297,14 @@ func TestUpdateRowCount(t *testing.T) {
 	wantRowsAffected(t, result, 0)
 }
 
-func TestNewConnector(t *testing.T) {
+func TestConnector(t *testing.T) {
 	ctx := context.Background()
 	sess := session.New()
-	connector := driver.NewConnector(sess)
-	if connector == nil {
-		t.Errorf("got=nil, want=non-nil")
-	}
+	connector := Connector{}
 	conn, err := connector.Connect(ctx)
+	wantErrorMessageContaining(t, err, "SimpleDB cannot be nil")
+	connector.SimpleDB = simpledb.New(sess)
+	conn, err = connector.Connect(ctx)
 	wantNoError(t, err)
 	if conn == nil {
 		t.Errorf("got=nil, want=non-nil")
@@ -322,10 +323,7 @@ func TestNewConnector(t *testing.T) {
 func TestNotImplemented(t *testing.T) {
 	ctx := context.Background()
 	sess := session.New()
-	connector := driver.NewConnector(sess)
-	if connector == nil {
-		t.Errorf("got=nil, want=non-nil")
-	}
+	connector := Connector{SimpleDB: simpledb.New(sess)}
 	conn, err := connector.Connect(ctx)
 	wantNoError(t, err)
 
@@ -336,19 +334,19 @@ func TestNotImplemented(t *testing.T) {
 	wantNotImplemented(t, err)
 
 	{
-		queryer := conn.(stddriver.Queryer)
+		queryer := conn.(driver.Queryer)
 		_, err = queryer.Query("", nil)
 		wantNotImplemented(t, err)
 	}
 
 	{
-		execer := conn.(stddriver.Execer)
+		execer := conn.(driver.Execer)
 		_, err = execer.Exec("", nil)
 		wantNotImplemented(t, err)
 	}
 }
 
-// Various error conditinos
+// Various error conditions
 func TestErrors(t *testing.T) {
 	ctx := context.Background()
 	db := newDB(t)
@@ -362,6 +360,98 @@ func TestErrors(t *testing.T) {
 	_, err = db.ExecContext(ctx, "select id, a from tbl where id = :name", sql.Named("name", "xxx"))
 	wantErrorMessageContaining(t, err, "named args are not implemented")
 
+	_, err = db.QueryContext(ctx, "select a, b from tbl where id = ?")
+	wantErrorMessageContaining(t, err, "not enough args supplied")
+
+	_, err = db.QueryContext(ctx, "select a, b from tbl where id = ? and b = 'x'")
+	wantErrorMessageContaining(t, err, "not enough args for select query")
+}
+
+type aStringType string
+
+func TestMakeSelectExpression(t *testing.T) {
+	tests := []struct {
+		query   string
+		args    []interface{}
+		want    string
+		wantErr string
+	}{
+		{
+			query: "select id, a from tbl where a > ?",
+			args:  []interface{}{"X"},
+			want:  "select `sql:id`, `a`, `sql:a` from `tbl` where a > 'X'",
+		},
+		{
+			query: "select a, b, c from tbl where id = ? and d < ?",
+			args:  []interface{}{"X", "zz"},
+			want: "select `sql:id`, `a`, `sql:a`, `b`, `sql:b`, `c`, `sql:c`" +
+				" from `tbl` where itemName() = 'X' and d < 'zz'",
+		},
+		{
+			query: "select id from tbl where a = ?",
+			args:  []interface{}{aStringType("X'X")},
+			want:  "select `sql:id` from `tbl` where a = 'X''X'",
+		},
+		{
+			query:   "select id from tbl where a = ?",
+			args:    nil,
+			wantErr: "not enough args for select query",
+		},
+	}
+	for tn, tt := range tests {
+		var args []driver.Value
+		for _, arg := range tt.args {
+			args = append(args, driver.Value(arg))
+		}
+		q, err := parse.Parse(tt.query)
+		wantNoError(t, err)
+		c := conn{}
+		got, err := c.makeSelectExpression(q.Select, args)
+		if tt.wantErr != "" {
+			wantErrorMessageContaining(t, err, tt.wantErr)
+			continue
+		}
+		wantNoError(t, err)
+		if got != tt.want {
+			t.Errorf("%d:\n got=%v\nwant=%v", tn, got, tt.want)
+		}
+	}
+}
+
+func TestDomainName(t *testing.T) {
+	tests := []struct {
+		c          conn
+		tableName  string
+		domainName string
+	}{
+		{
+			c:          conn{},
+			tableName:  "tbl",
+			domainName: "tbl",
+		},
+		{
+			c: conn{
+				Schema: "dev",
+			},
+			tableName:  "tbl",
+			domainName: "dev.tbl",
+		},
+		{
+			c: conn{
+				Schema: "dev",
+				Synonyms: map[string]string{
+					"tbl": "abc",
+				},
+			},
+			tableName:  "tbl",
+			domainName: "abc",
+		},
+	}
+	for tn, tt := range tests {
+		if got, want := tt.c.getDomainName(tt.tableName), tt.domainName; got != want {
+			t.Errorf("%d: got=%q want=%q", tn, got, want)
+		}
+	}
 }
 
 func wantNoError(t *testing.T, err error) {

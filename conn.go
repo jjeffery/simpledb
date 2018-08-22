@@ -1,28 +1,24 @@
-// Package driver provides an AWS SimpleDB driver for database/sql.
-package driver
+package simpledbsql
 
 import (
 	"context"
-	"database/sql"
 	"database/sql/driver"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/client"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/simpledb"
 	"github.com/aws/aws-sdk-go/service/simpledb/simpledbiface"
 	"github.com/jjeffery/errors"
-	"github.com/jjeffery/simpledb/internal/parse"
+	"github.com/jjeffery/simpledbsql/internal/parse"
 	"golang.org/x/sync/errgroup"
 )
 
+// SimpleDB error codes
 const (
 	// conditionalCheckFailed is the error code returned by the AWS SimpleDB API
 	// when an expected condition is not met.
@@ -34,37 +30,7 @@ const (
 	attributeDoesNotExist = "AttributeDoesNotExist"
 )
 
-func init() {
-	sql.Register("simpledb", &Driver{})
-}
-
-// Driver implements the driver.Driver interface.
-type Driver struct {
-	sdb simpledbiface.SimpleDBAPI
-}
-
-// Open returns a new connection to the database.
-// The name is currently ignored and should be a blank
-// string, but in future may include parameters like
-// region, profile, consistent-read, etc.
-func (d *Driver) Open(name string) (driver.Conn, error) {
-	if d.sdb == nil {
-		sess, err := session.NewSessionWithOptions(session.Options{
-			// this option obtains the region setting from the ~/.aws/config file
-			// if it is set
-			SharedConfigState: session.SharedConfigEnable,
-		})
-		if err != nil {
-			return nil, err
-		}
-		d.sdb = simpledb.New(sess)
-	}
-	c := &conn{
-		sdb: d.sdb,
-	}
-	return c, nil
-}
-
+// checks that conn implements the various driver interfaces
 var (
 	_ driver.Queryer           = (*conn)(nil)
 	_ driver.Execer            = (*conn)(nil)
@@ -73,33 +39,10 @@ var (
 	_ driver.NamedValueChecker = (*conn)(nil)
 )
 
-type connector struct {
-	sdb simpledbiface.SimpleDBAPI
-}
-
-// NewConnector returns a connector that can be used with the
-// sql.OpenDB function. Although sess can be any client.ConfigProvider,
-// it will typically be a *session.Session.
-func NewConnector(sess client.ConfigProvider) driver.Connector {
-	return &connector{
-		sdb: simpledb.New(sess),
-	}
-}
-
-func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
-	return &conn{
-		sdb: c.sdb,
-	}, nil
-}
-
-func (c *connector) Driver() driver.Driver {
-	return &Driver{
-		sdb: c.sdb,
-	}
-}
-
 type conn struct {
-	sdb simpledbiface.SimpleDBAPI
+	SimpleDB simpledbiface.SimpleDBAPI
+	Schema   string
+	Synonyms map[string]string
 }
 
 func (c *conn) Prepare(query string) (driver.Stmt, error) {
@@ -137,29 +80,133 @@ func (c *conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 		return nil, errors.New("expect select query for QueryContext")
 	}
 
-	var selectExpression string
-	{
-		var sb strings.Builder
-		sb.WriteString(q.Select.Segments[0])
-		for i, arg := range args {
-			s := arg.Value.(string)
-			sb.WriteString(quoteString(s))
-			sb.WriteString(q.Select.Segments[i+1])
+	if q.Select.Key == nil {
+		return c.selectQuery(ctx, q.Select, getArgs(args))
+	}
+
+	return c.getAttributes(ctx, q.Select, getArgs(args))
+}
+
+func (c *conn) getAttributes(ctx context.Context, q *parse.SelectQuery, args []driver.Value) (driver.Rows, error) {
+	itemName, err := q.Key.String(args)
+	if err != nil {
+		return nil, err
+	}
+	domainName := c.getDomainName(q.TableName)
+
+	getAttributesInput := simpledb.GetAttributesInput{
+		ConsistentRead: aws.Bool(q.ConsistentRead),
+		DomainName:     aws.String(domainName),
+		ItemName:       aws.String(itemName),
+		AttributeNames: make([]*string, 0, len(q.ColumnNames)*2+1),
+	}
+
+	for _, columnName := range q.ColumnNames {
+		getAttributesInput.AttributeNames = append(getAttributesInput.AttributeNames,
+			aws.String(columnName),
+			aws.String("sql:"+columnName),
+		)
+	}
+	getAttributesInput.AttributeNames = append(getAttributesInput.AttributeNames, aws.String("sql:id"))
+
+	getAttributesOutput, err := c.SimpleDB.GetAttributesWithContext(ctx, &getAttributesInput)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot get item").With(
+			"itemName", itemName,
+			"table", q.TableName,
+			"domain", domainName,
+		)
+	}
+	rows := newGetAttributeRows(q.ColumnNames)
+	if len(getAttributesOutput.Attributes) > 0 {
+		rows.item = &simpledb.Item{
+			Name:       aws.String(itemName),
+			Attributes: getAttributesOutput.Attributes,
 		}
-		selectExpression = sb.String()
+	}
+	return rows, nil
+}
+
+func (c *conn) selectQuery(ctx context.Context, q *parse.SelectQuery, args []driver.Value) (driver.Rows, error) {
+	selectExpression, err := c.makeSelectExpression(q, args)
+	if err != nil {
+		return nil, err
 	}
 
 	selectInput := &simpledb.SelectInput{
-		ConsistentRead:   aws.Bool(q.Select.ConsistentRead),
+		ConsistentRead:   aws.Bool(q.ConsistentRead),
 		SelectExpression: aws.String(selectExpression),
 	}
 
-	rows := newRows(ctx, c.sdb, q.Select.ColumnNames, selectInput)
+	rows := newRows(ctx, c.SimpleDB, q.ColumnNames, selectInput)
 	if err := rows.selectNext(); err != nil {
 		return nil, err
 	}
 
 	return rows, nil
+}
+
+func (c *conn) getDomainName(tableName string) string {
+	if dn, ok := c.Synonyms[tableName]; ok {
+		return dn
+	}
+	if c.Schema != "" {
+		return c.Schema + "." + tableName
+	}
+	return tableName
+}
+
+func (c *conn) makeSelectExpression(q *parse.SelectQuery, args []driver.Value) (string, error) {
+	quoteIdentifier := func(columnName string) string {
+		s := strings.Replace(columnName, "`", "``", -1)
+		return "`" + s + "`"
+	}
+	getArg := func(index int) (string, error) {
+		if index >= len(args) {
+			return "", errors.New("not enough args for select query")
+		}
+		v := args[index]
+		if s, ok := v.(string); ok {
+			return s, nil
+		}
+		vv := reflect.ValueOf(v)
+		if vv.Kind() == reflect.String {
+			return vv.String(), nil
+		}
+		return "", errors.New("all args to a select query must be strings")
+	}
+	columnNames := make([]string, 0, len(q.ColumnNames)*2+1)
+	columnNames = append(columnNames, quoteIdentifier("sql:id"))
+	for _, columnName := range q.ColumnNames {
+		if !parse.IsID(columnName) {
+			columnNames = append(columnNames, quoteIdentifier(columnName))
+			columnNames = append(columnNames, quoteIdentifier("sql:"+columnName))
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("select ")
+	sb.WriteString(strings.Join(columnNames, ", "))
+	sb.WriteString(" from ")
+	sb.WriteString(quoteIdentifier(c.getDomainName(q.TableName)))
+	sb.WriteString(" ")
+	var argIndex int
+	for _, lexeme := range q.WhereClause {
+		switch lexeme {
+		case "id", "`id`":
+			sb.WriteString("itemName()")
+		case "?":
+			arg, err := getArg(argIndex)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(quoteString(arg))
+			argIndex++
+		default:
+			sb.WriteString(lexeme)
+		}
+	}
+	return sb.String(), nil
 }
 
 func (c *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -201,26 +248,30 @@ func (c *conn) CheckNamedValue(arg *driver.NamedValue) (err error) {
 }
 
 func (c *conn) createTable(ctx context.Context, q *parse.CreateTableQuery) (driver.Result, error) {
+	domainName := c.getDomainName(q.TableName)
 	input := simpledb.CreateDomainInput{
-		DomainName: aws.String(q.TableName),
+		DomainName: aws.String(domainName),
 	}
-	_, err := c.sdb.CreateDomainWithContext(ctx, &input)
+	_, err := c.SimpleDB.CreateDomainWithContext(ctx, &input)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot create simpledb domain").With(
-			"domain", q.TableName,
+			"domain", domainName,
+			"table", q.TableName,
 		)
 	}
 	return newResult(1), nil
 }
 
 func (c *conn) dropTable(ctx context.Context, q *parse.DropTableQuery) (driver.Result, error) {
+	domainName := c.getDomainName(q.TableName)
 	input := simpledb.DeleteDomainInput{
-		DomainName: aws.String(q.TableName),
+		DomainName: aws.String(c.getDomainName(domainName)),
 	}
-	_, err := c.sdb.DeleteDomainWithContext(ctx, &input)
+	_, err := c.SimpleDB.DeleteDomainWithContext(ctx, &input)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot delete simpledb domain").With(
-			"domain", q.TableName,
+			"domain", domainName,
+			"table", q.TableName,
 		)
 	}
 	return newResult(1), nil
@@ -232,10 +283,10 @@ func (c *conn) deleteRow(ctx context.Context, q *parse.DeleteQuery, args []drive
 		return nil, err
 	}
 	deleteInput := simpledb.DeleteAttributesInput{
-		DomainName: aws.String(q.TableName),
+		DomainName: aws.String(c.getDomainName(q.TableName)),
 		ItemName:   aws.String(itemName),
 	}
-	_, err = c.sdb.DeleteAttributesWithContext(ctx, &deleteInput)
+	_, err = c.SimpleDB.DeleteAttributesWithContext(ctx, &deleteInput)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot delete attributes").With(
 			"itemName", itemName,
@@ -257,7 +308,7 @@ func (c *conn) insertRow(ctx context.Context, q *parse.InsertQuery, args []drive
 		Name:   aws.String("sql:id"),
 	}
 
-	_, err = c.sdb.PutAttributesWithContext(ctx, putInput)
+	_, err = c.SimpleDB.PutAttributesWithContext(ctx, putInput)
 	if err != nil {
 		if hasCode(err, conditionalCheckFailed) {
 			msg := fmt.Sprintf(
@@ -301,7 +352,7 @@ func (c *conn) updateRow(ctx context.Context, q *parse.UpdateQuery, args []drive
 	if len(putInput.Attributes) > 0 {
 		group.Go(func() error {
 			var err error
-			_, err = c.sdb.PutAttributesWithContext(ctx, putInput)
+			_, err = c.SimpleDB.PutAttributesWithContext(ctx, putInput)
 			if err != nil {
 				if hasCode(err, attributeDoesNotExist) {
 					// not an error, it just means the item does not exist
@@ -320,7 +371,7 @@ func (c *conn) updateRow(ctx context.Context, q *parse.UpdateQuery, args []drive
 	if len(deleteInput.Attributes) > 0 {
 		group.Go(func() error {
 			var err error
-			_, err = c.sdb.DeleteAttributesWithContext(ctx, deleteInput)
+			_, err = c.SimpleDB.DeleteAttributesWithContext(ctx, deleteInput)
 			if err != nil {
 				if hasCode(err, attributeDoesNotExist) {
 					// not an error, it just means the item does not exist
@@ -357,11 +408,11 @@ func (c *conn) newPutDeleteInputs(ctx context.Context, tableName string, columns
 		return nil, nil, err
 	}
 	putInput = &simpledb.PutAttributesInput{
-		DomainName: aws.String(tableName),
+		DomainName: aws.String(c.getDomainName(tableName)),
 		ItemName:   aws.String(itemName),
 	}
 	deleteInput = &simpledb.DeleteAttributesInput{
-		DomainName: aws.String(tableName),
+		DomainName: aws.String(c.getDomainName(tableName)),
 		ItemName:   aws.String(itemName),
 	}
 	addPut := func(name, value string) {
@@ -444,171 +495,6 @@ func quoteString(s string) string {
 	return "'" + s + "'"
 }
 
-// rowsT implements the sql.Rows interface. It can keep querying the next page of
-// results for as long as the calling program wants them. This makes it possible
-// for the calling program to initiate queries that return a large number of rows
-// without filling up memory.
-type rowsT struct {
-	columns       []string
-	colmap        map[string]int
-	itemNameIndex int // index of column corresponding to itemName
-	ctx           context.Context
-	simpledb      simpledbiface.SimpleDBAPI
-	input         *simpledb.SelectInput
-	items         []*simpledb.Item
-}
-
-func newRows(ctx context.Context, simpledb simpledbiface.SimpleDBAPI, columns []string, input *simpledb.SelectInput) *rowsT {
-	rows := &rowsT{
-		columns:  columns,
-		colmap:   make(map[string]int),
-		ctx:      ctx,
-		simpledb: simpledb,
-		input:    input,
-	}
-	for i, col := range columns {
-		if parse.IsID(col) {
-			rows.itemNameIndex = i
-		} else {
-			rows.colmap[col] = i
-		}
-	}
-	return rows
-}
-
-func (rows *rowsT) selectNext() error {
-	output, err := rows.simpledb.SelectWithContext(rows.ctx, rows.input)
-	if err != nil {
-		return err
-	}
-	rows.input.NextToken = output.NextToken
-	rows.items = output.Items
-	return nil
-}
-
-func (rows *rowsT) Columns() []string {
-	return rows.columns
-}
-
-func (rows *rowsT) Close() error {
-	rows.items = nil
-	return nil
-}
-
-func (rows *rowsT) Next(dest []driver.Value) error {
-	for len(rows.items) == 0 {
-		// if input next token is non-nil, that means there are more rows
-		if rows.input.NextToken == nil {
-			return io.EOF
-		}
-		if err := rows.selectNext(); err != nil {
-			return err
-		}
-	}
-	item := rows.items[0]
-	rows.items = rows.items[1:]
-
-	// everything starts as nil
-	for i := range dest {
-		dest[i] = nil
-	}
-
-	dest[rows.itemNameIndex] = derefString(item.Name)
-	colTypes := make(map[string]string, len(item.Attributes))
-
-	// collect the column types first
-	for _, attr := range item.Attributes {
-		name := derefString(attr.Name)
-		if strings.HasPrefix(name, "sql:") {
-			value := derefString(attr.Value)
-			colTypes[name] = value
-			colName := strings.TrimPrefix(name, "sql:")
-			if index, ok := rows.colmap[colName]; ok {
-				switch value {
-				case "string":
-					dest[index] = ""
-				case "int64":
-					dest[index] = int64(0)
-				case "float64":
-					dest[index] = float64(0)
-				case "bool":
-					dest[index] = false
-				case "binary", "null":
-					dest[index] = nil
-				}
-			}
-		}
-	}
-
-	for _, attr := range item.Attributes {
-		name := derefString(attr.Name)
-		value := derefString(attr.Value)
-		colType := colTypes[typeColumnName(name)]
-		if colType == "" {
-			colType = "string"
-		}
-		if index, ok := rows.colmap[name]; ok {
-			switch colType {
-			case "string":
-				dest[index] = value
-			case "int64":
-				{
-					n, _ := strconv.ParseInt(value, 10, 64)
-					dest[index] = n
-				}
-			case "float64":
-				{
-					n, _ := strconv.ParseFloat(value, 64)
-					dest[index] = n
-				}
-
-			case "bool":
-				{
-					b, _ := strconv.ParseBool(value)
-					dest[index] = b
-				}
-			case "time":
-				{
-					t, _ := time.Parse(time.RFC3339, value)
-					dest[index] = t
-				}
-			case "binary":
-				{
-					// TODO(jpj): handle strings longer than 1024
-					data, _ := base64.StdEncoding.DecodeString(value)
-					dest[index] = data
-				}
-			}
-		}
-	}
-	return nil
-}
-
-type resultT struct {
-	rowsAffected int64
-}
-
-func newResult(rowCount int) *resultT {
-	return &resultT{
-		rowsAffected: int64(rowCount),
-	}
-}
-
-func (r *resultT) LastInsertId() (int64, error) {
-	return 0, errors.New("not supported: LastInsertId")
-}
-
-func (r *resultT) RowsAffected() (int64, error) {
-	return r.rowsAffected, nil
-}
-
-func derefString(sp *string) string {
-	if sp == nil {
-		return ""
-	}
-	return *sp
-}
-
 func getArgs(args []driver.NamedValue) []driver.Value {
 	var max int
 	for _, arg := range args {
@@ -628,6 +514,13 @@ func hasCode(err error, code string) bool {
 		return code == coder.Code()
 	}
 	return false
+}
+
+func derefString(sp *string) string {
+	if sp == nil {
+		return ""
+	}
+	return *sp
 }
 
 type duplicateKeyError string

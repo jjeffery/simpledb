@@ -10,86 +10,83 @@ func TestParseSelect(t *testing.T) {
 	tests := []struct {
 		query       string
 		columnNames []string
-		segments    []string
+		tableName   string
+		whereClause []string
 		consistent  bool
+		key         *Key
 	}{
 		{
 			query:       "select a, b, c from tbl where id = ?",
 			columnNames: []string{"a", "b", "c"},
-			segments: []string{
-				"select a, `sql:a`, b, `sql:b`, c, `sql:c` from tbl where itemName() = ",
-				"",
+			tableName:   "tbl",
+			key:         &Key{},
+		},
+		{
+			query:       "select a, b, c from tbl where id = '11'",
+			columnNames: []string{"a", "b", "c"},
+			tableName:   "tbl",
+			key: &Key{
+				Value: stringPtr("11"),
+			},
+		},
+		{
+			query:       "select a, b, c from tbl limit 10",
+			columnNames: []string{"a", "b", "c"},
+			tableName:   "tbl",
+			whereClause: []string{
+				"limit", " ", "10",
+			},
+		},
+		{
+			query:       "select a, b, c from tbl where id > '1000'",
+			columnNames: []string{"a", "b", "c"},
+			tableName:   "tbl",
+			whereClause: []string{
+				"where", " ", "id", " ", ">", " ", "'1000'",
+			},
+		},
+		{
+			// simpledb won't run it, but it parses correctly
+			query:       "select a, b, c from tbl where id = a",
+			columnNames: []string{"a", "b", "c"},
+			tableName:   "tbl",
+			whereClause: []string{
+				"where", " ", "id", " ", "=", " ", "a",
+			},
+		},
+		{
+			query:       "select a, b, c from tbl where id = ? order by id",
+			columnNames: []string{"a", "b", "c"},
+			tableName:   "tbl",
+			whereClause: []string{
+				"where", " ", "id", " ", "=", " ", "?",
+				" ", "order", " ", "by", " ", "id",
 			},
 		},
 		{
 			query:       "select `a`, `b`, `c` from `tbl` where id = ? and c in (?, ?, ?)",
 			columnNames: []string{"a", "b", "c"},
-			segments: []string{
-				"select `a`, `sql:a`, `b`, `sql:b`, `c`, `sql:c` from `tbl` where itemName() = ",
-				" and c in (",
-				", ",
-				", ",
-				")",
+			tableName:   "tbl",
+			whereClause: []string{
+				"where", " ", "id", " ", "=", " ", "?", " ", "and", " ", "c",
+				" ", "in", " ", "(", "?", ",", " ", "?", ",", " ", "?", ")",
 			},
 		},
 		{
 			query:       "select `a`, `b`, `c` from `tbl` where id = ? and c in (?, ?, ?)",
 			columnNames: []string{"a", "b", "c"},
-			segments: []string{
-				"select `a`, `sql:a`, `b`, `sql:b`, `c`, `sql:c` from `tbl` where itemName() = ",
-				" and c in (",
-				", ",
-				", ",
-				")",
-			},
-		},
-		{
-			query:       "select `id`, `b`, `c` from `tbl` where d = ? and `Id` in (?, ?, ?)",
-			columnNames: []string{"id", "b", "c"},
-			segments: []string{
-				"select `b`, `sql:b`, `c`, `sql:c` from `tbl` where d = ",
-				" and itemName() in (",
-				", ",
-				", ",
-				")",
-			},
-		},
-		{
-			query:       "select `a`, `id`, `c` from `tbl` where d = ? and `Id` in (?, ?, ?)",
-			columnNames: []string{"a", "id", "c"},
-			segments: []string{
-				"select `a`, `sql:a`, `c`, `sql:c` from `tbl` where d = ",
-				" and itemName() in (",
-				", ",
-				", ",
-				")",
-			},
-		},
-		{
-			query:       "select `a`, `b`, `id` from `tbl` where d = ? and `Id` in (?, ?, ?)",
-			columnNames: []string{"a", "b", "id"},
-			segments: []string{
-				"select `a`, `sql:a`, `b`, `sql:b` from `tbl` where d = ",
-				" and itemName() in (",
-				", ",
-				", ",
-				")",
-			},
-		},
-		{
-			query:       "select `id` from `tbl` where d = ?",
-			columnNames: []string{"id"},
-			segments: []string{
-				"select itemName() from `tbl` where d = ",
-				"",
+			tableName:   "tbl",
+			whereClause: []string{
+				"where", " ", "id", " ", "=", " ", "?", " ", "and", " ", "c", " ", "in", " ",
+				"(", "?", ",", " ", "?", ",", " ", "?", ")",
 			},
 		},
 		{
 			query:       "consistent select `id` from `tbl` where d in (?)",
 			columnNames: []string{"id"},
-			segments: []string{
-				"select itemName() from `tbl` where d in (",
-				")",
+			tableName:   "tbl",
+			whereClause: []string{
+				"where", " ", "d", " ", "in", " ", "(", "?", ")",
 			},
 			consistent: true,
 		},
@@ -103,10 +100,16 @@ func TestParseSelect(t *testing.T) {
 		if q.Select == nil {
 			t.Errorf("%d: got=nil, want=non-nil", tn)
 		}
+		if got, want := q.Select.TableName, tt.tableName; got != want {
+			t.Errorf("%d: got=%q, want=%q", tn, got, want)
+		}
 		compareStringSlices(t, tn, q.Select.ColumnNames, tt.columnNames)
-		compareStringSlices(t, tn, q.Select.Segments, tt.segments)
+		compareStringSlices(t, tn, q.Select.WhereClause, tt.whereClause)
 		if got, want := q.Select.ConsistentRead, tt.consistent; got != want {
 			t.Errorf("%d: got=%v, want=%v", tn, got, want)
+		}
+		if got, want := q.Select.Key, tt.key; !reflect.DeepEqual(got, want) {
+			t.Errorf("%d: got=%+v, want=%+v", tn, got, want)
 		}
 	}
 }
@@ -398,6 +401,8 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
+type aStringType string
+
 func TestKeyString(t *testing.T) {
 	tests := []struct {
 		key       Key
@@ -421,9 +426,23 @@ func TestKeyString(t *testing.T) {
 		},
 		{
 			key: Key{
+				Ordinal: 0,
+			},
+			values: []driver.Value{aStringType("a")},
+			str:    "a",
+		},
+		{
+			key: Key{
 				Ordinal: 4,
 			},
 			values:    []driver.Value{"a", "b"},
+			expectErr: true,
+		},
+		{
+			key: Key{
+				Ordinal: 0,
+			},
+			values:    []driver.Value{0},
 			expectErr: true,
 		},
 	}
